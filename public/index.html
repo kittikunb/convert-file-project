@@ -5,59 +5,162 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>File Converter — PDF / XLS → XLSX</title>
 <style>
-  body{font-family:system-ui,sans-serif;max-width:640px;margin:48px auto;padding:0 16px;color:#222}
+  body{font-family:system-ui,sans-serif;max-width:760px;margin:48px auto;padding:0 16px;color:#222}
   #drop{border:2px dashed #888;border-radius:12px;padding:48px 16px;text-align:center;cursor:pointer}
   #drop.over{background:#eef6ff;border-color:#2b7de9}
   li{margin:8px 0}.err{color:#c00}.ok{color:#080}
   small{color:#666}
-  button{padding:10px 16px;font-size:1rem;cursor:pointer;margin-top:12px}
+  button{padding:8px 14px;font-size:1rem;cursor:pointer;margin:6px 6px 0 0}
+  fieldset{margin:16px 0;border:1px solid #ccc;border-radius:8px}
+  label{display:block;margin:4px 0}
+  progress{width:100%;margin-top:12px}
+  .scroll{overflow:auto;max-height:340px;margin-top:12px}
+  table{border-collapse:collapse;font-size:.85rem}
+  td,th{border:1px solid #ccc;padding:3px 8px;white-space:nowrap}
+  th{background:#f3f3f3;position:sticky;top:0}
 </style>
 </head>
 <body>
 <h1>File Converter</h1>
 <p>แปลงไฟล์ <b>PDF</b> (ตาราง) และ <b>XLS</b> เป็น <b>XLSX</b></p>
+
+<fieldset>
+  <legend>เมื่อแปลงเสร็จ ให้ดาวน์โหลดอัตโนมัติ</legend>
+  <label><input type="checkbox" id="optZip" checked> ไฟล์ที่แปลงแล้วทั้งหมด เป็น zip ไฟล์เดียว</label>
+  <label><input type="checkbox" id="optMerge" checked> ไฟล์รวม merged.xlsx (ต่อแถวเป็นตารางเดียว)</label>
+  <label><input type="checkbox" id="optEach"> ไฟล์แยกทีละไฟล์ (ดาวน์โหลดหลายครั้ง)</label>
+</fieldset>
+
 <div id="drop">ลากไฟล์มาวางที่นี่ หรือคลิกเพื่อเลือก<br><small>.pdf / .xls — ไฟล์ละไม่เกิน 4 MB</small></div>
 <input id="file" type="file" accept=".pdf,.xls" multiple hidden>
+<progress id="bar" value="0" max="1" hidden></progress>
 <ul id="list"></ul>
-<button id="merge" hidden>รวมทุกไฟล์เป็นไฟล์เดียว (.xlsx)</button>
-<p id="mergemsg"></p>
+
+<div id="actions" hidden>
+  <button id="btnZip">ดาวน์โหลด zip</button>
+  <button id="btnMerge">ดาวน์โหลดไฟล์รวม</button>
+  <button id="btnPreview">ดูตัวอย่างข้อมูลรวม</button>
+  <button id="btnClear">ล้างรายการ</button>
+</div>
+<p id="msg"></p>
+<div id="preview" class="scroll" hidden></div>
+
 <script>
-const drop=document.getElementById('drop'),input=document.getElementById('file'),list=document.getElementById('list');
-const done=[],mergeBtn=document.getElementById('merge'),mergeMsg=document.getElementById('mergemsg');
+const $=id=>document.getElementById(id);
+const drop=$('drop'),input=$('file'),list=$('list'),bar=$('bar'),msg=$('msg'),actions=$('actions'),preview=$('preview');
+let done=[]; // {name, blob}
+
 drop.onclick=()=>input.click();
-input.onchange=()=>handle(input.files);
+input.onchange=()=>handle([...input.files]);
 drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};
 drop.ondragleave=()=>drop.classList.remove('over');
-drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');handle(e.dataTransfer.files)};
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');handle([...e.dataTransfer.files])};
+
+function reset(){list.innerHTML='';done=[];actions.hidden=true;msg.textContent='';preview.hidden=true;preview.innerHTML='';bar.hidden=true}
+$('btnClear').onclick=reset;
+
+function save(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),10000)}
+async function errText(r){let m=r.statusText;try{m=(await r.json()).error||m}catch{}return m}
+function uniqueName(name){
+  if(!done.some(d=>d.name===name))return name;
+  const base=name.replace(/\.xlsx$/,'');let i=2;
+  while(done.some(d=>d.name===`${base} (${i}).xlsx`))i++;
+  return `${base} (${i}).xlsx`;
+}
 
 async function handle(files){
-  list.innerHTML='';done.length=0;mergeBtn.hidden=true;mergeMsg.textContent='';
+  reset();
+  if(!files.length)return;
+  bar.hidden=false;bar.max=files.length;bar.value=0;
+  let n=0;
   for(const f of files){
     const li=document.createElement('li');li.textContent=f.name+' … กำลังแปลง';list.append(li);
     try{
       const fd=new FormData();fd.append('file',f);
       const r=await fetch('/api/convert',{method:'POST',body:fd});
-      if(!r.ok){let m=r.statusText;try{m=(await r.json()).error||m}catch{}throw new Error(m)}
-      const blob=await r.blob();done.push({name:f.name.replace(/\.[^.]+$/,'')+'.xlsx',blob});const a=document.createElement('a');
-      a.href=URL.createObjectURL(blob);a.download=f.name.replace(/\.[^.]+$/,'')+'.xlsx';a.click();
-      li.innerHTML='<span class="ok">✓</span> '+f.name+' → ดาวน์โหลดแล้ว';
+      if(!r.ok)throw new Error(await errText(r));
+      const blob=await r.blob(),name=uniqueName(f.name.replace(/\.[^.]+$/,'')+'.xlsx');
+      done.push({name,blob});
+      if($('optEach').checked)save(blob,name);
+      li.innerHTML='<span class="ok">✓</span> '+f.name;
     }catch(e){li.innerHTML='<span class="err">✗</span> '+f.name+': '+e.message}
+    bar.value=++n;
   }
   input.value='';
-  mergeBtn.hidden=done.length<2;
+  bar.hidden=true;
+  if(!done.length)return;
+  actions.hidden=false;
+  msg.innerHTML=`แปลงสำเร็จ ${done.length}/${files.length} ไฟล์`;
+  if($('optZip').checked)downloadZip();
+  if($('optMerge').checked&&done.length>=2)setTimeout(downloadMerged,600);
 }
 
-mergeBtn.onclick=async()=>{
-  mergeBtn.disabled=true;mergeMsg.textContent='กำลังรวมไฟล์…';mergeMsg.className='';
+$('btnZip').onclick=downloadZip;
+$('btnMerge').onclick=downloadMerged;
+$('btnPreview').onclick=showPreview;
+
+async function downloadZip(){
+  const entries=await Promise.all(done.map(async d=>({name:d.name,data:new Uint8Array(await d.blob.arrayBuffer())})));
+  save(makeZip(entries),'converted.zip');
+}
+
+function mergeForm(){const fd=new FormData();done.forEach(d=>fd.append('files',d.blob,d.name));return fd}
+
+async function downloadMerged(){
+  if(done.length<2){msg.textContent='ต้องมีอย่างน้อย 2 ไฟล์จึงจะรวมได้';return}
+  msg.textContent='กำลังรวมไฟล์…';
   try{
-    const fd=new FormData();done.forEach(d=>fd.append('files',d.blob,d.name));
-    const r=await fetch('/api/merge',{method:'POST',body:fd});
-    if(!r.ok){let m=r.statusText;try{m=(await r.json()).error||m}catch{}throw new Error(m)}
-    const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download='merged.xlsx';a.click();
-    mergeMsg.innerHTML='<span class="ok">✓</span> รวม '+done.length+' ไฟล์แล้ว';
-  }catch(e){mergeMsg.innerHTML='<span class="err">✗</span> '+e.message}
-  mergeBtn.disabled=false;
-};
+    const r=await fetch('/api/merge',{method:'POST',body:mergeForm()});
+    if(!r.ok)throw new Error(r.status===413?'ไฟล์รวมใหญ่เกิน 4 MB':await errText(r));
+    save(await r.blob(),'merged.xlsx');
+    msg.innerHTML='<span class="ok">✓</span> รวม '+done.length+' ไฟล์แล้ว';
+  }catch(e){msg.innerHTML='<span class="err">✗ รวมไฟล์ไม่สำเร็จ:</span> '+e.message}
+}
+
+async function showPreview(){
+  if(done.length<1)return;
+  msg.textContent='กำลังโหลดตัวอย่าง…';
+  try{
+    const r=await fetch('/api/merge?preview=1',{method:'POST',body:mergeForm()});
+    if(!r.ok)throw new Error(r.status===413?'ไฟล์รวมใหญ่เกิน 4 MB':await errText(r));
+    const j=await r.json();
+    const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    preview.innerHTML=`<table><thead><tr>${j.columns.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>`+
+      j.rows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')+'</tbody></table>';
+    preview.hidden=false;
+    msg.textContent=`ตัวอย่าง ${j.rows.length} แถวแรก จากทั้งหมด ${j.total} แถว`;
+  }catch(e){msg.innerHTML='<span class="err">✗</span> '+e.message}
+}
+
+// minimal ZIP writer (store, no compression — .xlsx is already compressed)
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+function crc32(d){let c=0xFFFFFFFF;for(let i=0;i<d.length;i++)c=CRC[(c^d[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0}
+function makeZip(entries){
+  const enc=new TextEncoder(),now=new Date();
+  const dosDate=((now.getFullYear()-1980)<<9)|((now.getMonth()+1)<<5)|now.getDate();
+  const dosTime=(now.getHours()<<11)|(now.getMinutes()<<5)|(now.getSeconds()>>1);
+  const parts=[],central=[];let offset=0;
+  for(const e of entries){
+    const name=enc.encode(e.name),crc=crc32(e.data),size=e.data.length;
+    const lh=new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(8,0,true);
+    lh.setUint16(10,dosTime,true);lh.setUint16(12,dosDate,true);lh.setUint32(14,crc,true);
+    lh.setUint32(18,size,true);lh.setUint32(22,size,true);lh.setUint16(26,name.length,true);lh.setUint16(28,0,true);
+    parts.push(lh.buffer,name,e.data);
+    const ch=new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);
+    ch.setUint16(10,0,true);ch.setUint16(12,dosTime,true);ch.setUint16(14,dosDate,true);ch.setUint32(16,crc,true);
+    ch.setUint32(20,size,true);ch.setUint32(24,size,true);ch.setUint16(28,name.length,true);
+    ch.setUint32(42,offset,true);
+    central.push(ch.buffer,name);
+    offset+=30+name.length+size;
+  }
+  const cdSize=central.reduce((s,b)=>s+(b.byteLength??b.length),0);
+  const end=new DataView(new ArrayBuffer(22));
+  end.setUint32(0,0x06054b50,true);end.setUint16(8,entries.length,true);end.setUint16(10,entries.length,true);
+  end.setUint32(12,cdSize,true);end.setUint32(16,offset,true);
+  return new Blob([...parts,...central,end.buffer],{type:'application/zip'});
+}
 </script>
 </body>
 </html>

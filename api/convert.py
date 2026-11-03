@@ -1,4 +1,7 @@
 """Vercel serverless endpoint: POST /api/convert (multipart, field "file")."""
+import io
+import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -48,7 +51,6 @@ def convert_endpoint():
 
         data = result.read_bytes()
 
-    import io
     return send_file(
         io.BytesIO(data),
         as_attachment=True,
@@ -57,30 +59,56 @@ def convert_endpoint():
     )
 
 
-@app.post("/api/merge")
-def merge_endpoint():
-    """Stack all sheets of all uploaded .xlsx files into one table."""
-    import io
-    import pandas as pd
+DATE_RE = re.compile(r"(?<!\d)(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)")
 
-    files = request.files.getlist("files")
-    if not files:
-        return jsonify(error="No files uploaded"), 400
+
+def build_merged(files):
+    import pandas as pd
 
     frames = []
     multi_sheet = False
     for f in files:
+        name = Path(f.filename).name
+        m = DATE_RE.search(name)
+        file_date = pd.Timestamp(f"{m.group(1)}-{m.group(2)}-{m.group(3)}") if m else None
         xls = pd.ExcelFile(io.BytesIO(f.read()), engine="openpyxl")
         multi_sheet = multi_sheet or len(xls.sheet_names) > 1
         for sheet in xls.sheet_names:
             df = xls.parse(sheet)
             df.insert(0, "source_sheet", sheet)
-            df.insert(0, "source_file", Path(f.filename).name)
+            if file_date is not None:
+                df.insert(0, "file_date", file_date)
+            df.insert(0, "source_file", name)
             frames.append(df)
 
     merged = pd.concat(frames, ignore_index=True, sort=False)
     if not multi_sheet:
         merged = merged.drop(columns="source_sheet")
+    return merged
+
+
+@app.post("/api/merge")
+def merge_endpoint():
+    """Stack all sheets of all uploaded .xlsx files into one table.
+
+    With ?preview=1 returns the first rows as JSON instead of the file.
+    """
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify(error="No files uploaded"), 400
+
+    merged = build_merged(files)
+
+    if request.args.get("preview"):
+        head = merged.head(20)
+        return app.response_class(
+            json.dumps({
+                "total": len(merged),
+                "columns": [str(c) for c in head.columns],
+                "rows": json.loads(head.to_json(orient="values", date_format="iso", date_unit="s")),
+            }),
+            mimetype="application/json",
+        )
 
     out = io.BytesIO()
     merged.to_excel(out, index=False, sheet_name="Merged")
