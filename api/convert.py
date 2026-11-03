@@ -55,3 +55,39 @@ def convert_endpoint():
         download_name=Path(name).stem + ".xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+@app.post("/api/merge")
+def merge_endpoint():
+    """Stack all sheets of all uploaded .xlsx files into one table."""
+    import io
+    import pandas as pd
+
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify(error="No files uploaded"), 400
+
+    frames = []
+    multi_sheet = False
+    for f in files:
+        xls = pd.ExcelFile(io.BytesIO(f.read()), engine="openpyxl")
+        multi_sheet = multi_sheet or len(xls.sheet_names) > 1
+        for sheet in xls.sheet_names:
+            df = xls.parse(sheet)
+            df.insert(0, "source_sheet", sheet)
+            df.insert(0, "source_file", Path(f.filename).name)
+            frames.append(df)
+
+    merged = pd.concat(frames, ignore_index=True, sort=False)
+    if not multi_sheet:
+        merged = merged.drop(columns="source_sheet")
+
+    out = io.BytesIO()
+    merged.to_excel(out, index=False, sheet_name="Merged")
+    out.seek(0)
+    return send_file(
+        out,
+        as_attachment=True,
+        download_name="merged.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
