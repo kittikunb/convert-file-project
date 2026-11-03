@@ -31,6 +31,7 @@ drop.ondragleave=()=>drop.classList.remove('over');
 drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');handle(e.dataTransfer.files)};
 
 async function handle(files){
+  list.innerHTML='';done.length=0;mergeBtn.hidden=true;mergeMsg.textContent='';
   for(const f of files){
     const li=document.createElement('li');li.textContent=f.name+' … กำลังแปลง';list.append(li);
     try{
