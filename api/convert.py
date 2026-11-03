@@ -13,6 +13,11 @@ app = Flask(__name__)
 MAX_BYTES = 4 * 1024 * 1024  # Vercel serverless request body limit is ~4.5 MB
 
 
+@app.errorhandler(Exception)
+def on_error(exc):
+    return jsonify(error=f"{type(exc).__name__}: {exc}"), 500
+
+
 @app.post("/api/convert")
 def convert_endpoint():
     f = request.files.get("file")
