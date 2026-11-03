@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>File Converter — PDF / XLS → XLSX</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:640px;margin:48px auto;padding:0 16px;color:#222}
+  #drop{border:2px dashed #888;border-radius:12px;padding:48px 16px;text-align:center;cursor:pointer}
+  #drop.over{background:#eef6ff;border-color:#2b7de9}
+  li{margin:8px 0}.err{color:#c00}.ok{color:#080}
+  small{color:#666}
+</style>
+</head>
+<body>
+<h1>File Converter</h1>
+<p>แปลงไฟล์ <b>PDF</b> (ตาราง) และ <b>XLS</b> เป็น <b>XLSX</b></p>
+<div id="drop">ลากไฟล์มาวางที่นี่ หรือคลิกเพื่อเลือก<br><small>.pdf / .xls — ไฟล์ละไม่เกิน 4 MB</small></div>
+<input id="file" type="file" accept=".pdf,.xls" multiple hidden>
+<ul id="list"></ul>
+<script>
+const drop=document.getElementById('drop'),input=document.getElementById('file'),list=document.getElementById('list');
+drop.onclick=()=>input.click();
+input.onchange=()=>handle(input.files);
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};
+drop.ondragleave=()=>drop.classList.remove('over');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');handle(e.dataTransfer.files)};
+
+async function handle(files){
+  for(const f of files){
+    const li=document.createElement('li');li.textContent=f.name+' … กำลังแปลง';list.append(li);
+    try{
+      const fd=new FormData();fd.append('file',f);
+      const r=await fetch('/api/convert',{method:'POST',body:fd});
+      if(!r.ok){let m=r.statusText;try{m=(await r.json()).error||m}catch{}throw new Error(m)}
+      const blob=await r.blob(),a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);a.download=f.name.replace(/\.[^.]+$/,'')+'.xlsx';a.click();
+      li.innerHTML='<span class="ok">✓</span> '+f.name+' → ดาวน์โหลดแล้ว';
+    }catch(e){li.innerHTML='<span class="err">✗</span> '+f.name+': '+e.message}
+  }
+  input.value='';
+}
+</script>
+</body>
+</html>
