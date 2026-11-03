@@ -1,5 +1,0 @@
-{
-  "functions": {
-    "api/convert.py": { "includeFiles": "convert.py", "maxDuration": 60 }
-  }
-}
