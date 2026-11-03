@@ -37,10 +37,7 @@
 <ul id="list"></ul>
 
 <div id="actions" hidden>
-  <button id="btnZip">ดาวน์โหลด zip</button>
-  <button id="btnMerge">ดาวน์โหลดไฟล์รวม</button>
   <button id="btnPreview">ดูตัวอย่างข้อมูลรวม</button>
-  <button id="btnClear">ล้างรายการ</button>
 </div>
 <p id="msg"></p>
 <div id="preview" class="scroll" hidden></div>
@@ -57,7 +54,6 @@ drop.ondragleave=()=>drop.classList.remove('over');
 drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');handle([...e.dataTransfer.files])};
 
 function reset(){list.innerHTML='';done=[];actions.hidden=true;msg.textContent='';preview.hidden=true;preview.innerHTML='';bar.hidden=true}
-$('btnClear').onclick=reset;
 
 function save(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),10000)}
 async function errText(r){let m=r.statusText;try{m=(await r.json()).error||m}catch{}return m}
@@ -95,8 +91,6 @@ async function handle(files){
   if($('optMerge').checked&&done.length>=2)setTimeout(downloadMerged,600);
 }
 
-$('btnZip').onclick=downloadZip;
-$('btnMerge').onclick=downloadMerged;
 $('btnPreview').onclick=showPreview;
 
 async function downloadZip(){
