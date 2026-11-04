@@ -21,6 +21,26 @@ def on_error(exc):
     return jsonify(error=f"{type(exc).__name__}: {exc}"), 500
 
 
+def convert_csv(src: Path, out_dir: Path) -> str:
+    """CSV -> xlsx. Tries UTF-8 (with BOM), then Thai Windows-874 encoding."""
+    import pandas as pd
+
+    last = None
+    for enc in ("utf-8-sig", "cp874"):
+        try:
+            df = pd.read_csv(src, sep=None, engine="python", encoding=enc)
+            break
+        except UnicodeDecodeError as exc:
+            last = exc
+        except Exception as exc:
+            return f"ERROR: {exc}"
+    else:
+        return f"ERROR: unsupported encoding ({last})"
+    out = out_dir / (src.stem + ".xlsx")
+    df.to_excel(out, index=False)
+    return f"ok ({len(df)} row(s))"
+
+
 @app.post("/api/convert")
 def convert_endpoint():
     f = request.files.get("file")
@@ -29,8 +49,8 @@ def convert_endpoint():
 
     name = Path(f.filename).name
     suffix = Path(name).suffix.lower()
-    if suffix not in (".pdf", ".xls"):
-        return jsonify(error="Only .pdf and .xls files are supported"), 400
+    if suffix not in (".pdf", ".xls", ".csv"):
+        return jsonify(error="Only .pdf, .xls and .csv files are supported"), 400
 
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / f"upload{suffix}"
@@ -42,6 +62,8 @@ def convert_endpoint():
         out_dir.mkdir()
         if suffix == ".pdf":
             status = core.convert_pdf_to_excel(src, out_dir)
+        elif suffix == ".csv":
+            status = convert_csv(src, out_dir)
         else:
             status = core.convert_xls_to_xlsx(src, out_dir)
 
