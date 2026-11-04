@@ -49,8 +49,8 @@ def convert_endpoint():
 
     name = Path(f.filename).name
     suffix = Path(name).suffix.lower()
-    if suffix not in (".pdf", ".xls", ".csv"):
-        return jsonify(error="Only .pdf, .xls and .csv files are supported"), 400
+    if suffix not in (".pdf", ".xls", ".csv", ".xlsx"):
+        return jsonify(error="Only .pdf, .xls, .xlsx and .csv files are supported"), 400
 
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / f"upload{suffix}"
@@ -64,6 +64,10 @@ def convert_endpoint():
             status = core.convert_pdf_to_excel(src, out_dir)
         elif suffix == ".csv":
             status = convert_csv(src, out_dir)
+        elif suffix == ".xlsx":
+            import shutil
+            shutil.copy(src, out_dir / "upload.xlsx")
+            status = "ok"
         else:
             status = core.convert_xls_to_xlsx(src, out_dir)
 
@@ -84,19 +88,30 @@ def convert_endpoint():
 DATE_RE = re.compile(r"(?<!\d)(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)")
 
 
-def build_merged(files):
+def read_csv_df(data: bytes):
+    import pandas as pd
+
+    last = None
+    for enc in ("utf-8-sig", "cp874"):
+        try:
+            return pd.read_csv(io.BytesIO(data), sep=None, engine="python", encoding=enc)
+        except UnicodeDecodeError as exc:
+            last = exc
+    raise ValueError(f"unsupported encoding ({last})")
+
+
+def stack(entries):
+    """entries: [(file_name, {sheet_name: DataFrame})] -> one stacked DataFrame."""
     import pandas as pd
 
     frames = []
     multi_sheet = False
-    for f in files:
-        name = Path(f.filename).name
+    for name, sheets in entries:
         m = DATE_RE.search(name)
         file_date = pd.Timestamp(f"{m.group(1)}-{m.group(2)}-{m.group(3)}") if m else None
-        xls = pd.ExcelFile(io.BytesIO(f.read()), engine="openpyxl")
-        multi_sheet = multi_sheet or len(xls.sheet_names) > 1
-        for sheet in xls.sheet_names:
-            df = xls.parse(sheet)
+        multi_sheet = multi_sheet or len(sheets) > 1
+        for sheet, df in sheets.items():
+            df = df.copy()
             df.insert(0, "source_sheet", sheet)
             if file_date is not None:
                 df.insert(0, "file_date", file_date)
@@ -107,6 +122,86 @@ def build_merged(files):
     if not multi_sheet:
         merged = merged.drop(columns="source_sheet")
     return merged
+
+
+def build_merged(files):
+    """Merge uploaded .xlsx files."""
+    import pandas as pd
+
+    entries = []
+    for f in files:
+        xls = pd.ExcelFile(io.BytesIO(f.read()), engine="openpyxl")
+        entries.append((Path(f.filename).name, {sh: xls.parse(sh) for sh in xls.sheet_names}))
+    return stack(entries)
+
+
+def csv_response(merged):
+    if "file_date" in merged.columns:
+        merged["file_date"] = merged["file_date"].dt.strftime("%Y-%m-%d")
+    # utf-8-sig so Excel opens Thai text correctly
+    data = merged.to_csv(index=False).encode("utf-8-sig")
+    return send_file(io.BytesIO(data), as_attachment=True, download_name="merged.csv", mimetype="text/csv")
+
+
+def xlsx_response(merged):
+    out = io.BytesIO()
+    merged.to_excel(out, index=False, sheet_name="Merged")
+    out.seek(0)
+    return send_file(
+        out,
+        as_attachment=True,
+        download_name="merged.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.post("/api/merge-original")
+def merge_original_endpoint():
+    """Merge original files of ONE type, keeping the extension.
+
+    csv -> merged.csv, xlsx -> merged.xlsx, pdf -> merged.pdf (pages appended),
+    xls -> converted to xlsx first, result is merged.xlsx.
+    """
+    import pandas as pd
+
+    files = request.files.getlist("files")
+    if len(files) < 2:
+        return jsonify(error="Need at least 2 files"), 400
+
+    kinds = {Path(f.filename).suffix.lower() for f in files}
+    if len(kinds) != 1:
+        return jsonify(error="ต้องเป็นไฟล์ชนิดเดียวกันเท่านั้น (พบ: " + ", ".join(sorted(kinds)) + ")"), 400
+    kind = kinds.pop()
+
+    if kind == ".csv":
+        entries = [(Path(f.filename).name, {"Sheet1": read_csv_df(f.read())}) for f in files]
+        return csv_response(stack(entries))
+
+    if kind == ".xlsx":
+        return xlsx_response(build_merged(files))
+
+    if kind == ".xls":
+        entries = []
+        with tempfile.TemporaryDirectory() as tmp:
+            for i, f in enumerate(files):
+                src = Path(tmp) / f"in{i}.xls"
+                f.save(src)
+                xls = pd.ExcelFile(src, engine="xlrd")
+                entries.append((Path(f.filename).name, {sh: xls.parse(sh) for sh in xls.sheet_names}))
+        return xlsx_response(stack(entries))
+
+    if kind == ".pdf":
+        from pypdf import PdfWriter
+
+        writer = PdfWriter()
+        for f in files:
+            writer.append(io.BytesIO(f.read()))
+        out = io.BytesIO()
+        writer.write(out)
+        out.seek(0)
+        return send_file(out, as_attachment=True, download_name="merged.pdf", mimetype="application/pdf")
+
+    return jsonify(error="Unsupported file type"), 400
 
 
 @app.post("/api/merge")
@@ -133,23 +228,5 @@ def merge_endpoint():
         )
 
     if request.args.get("format") == "csv":
-        if "file_date" in merged.columns:
-            merged["file_date"] = merged["file_date"].dt.strftime("%Y-%m-%d")
-        # utf-8-sig so Excel opens Thai text correctly
-        data = merged.to_csv(index=False).encode("utf-8-sig")
-        return send_file(
-            io.BytesIO(data),
-            as_attachment=True,
-            download_name="merged.csv",
-            mimetype="text/csv",
-        )
-
-    out = io.BytesIO()
-    merged.to_excel(out, index=False, sheet_name="Merged")
-    out.seek(0)
-    return send_file(
-        out,
-        as_attachment=True,
-        download_name="merged.xlsx",
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+        return csv_response(merged)
+    return xlsx_response(merged)
