@@ -24,7 +24,8 @@
 <h1>File Converter</h1>
 <p>แปลงไฟล์ <b>PDF</b> (ตาราง), <b>XLS</b>, <b>XLSX</b> และ <b>CSV</b> เป็น <b>XLSX</b></p>
 
-<fieldset>
+<label><input type="checkbox" id="optConvert" checked autocomplete="off"> <b>แปลงเป็น .xlsx</b> (ถ้าไม่ติ๊ก จะไม่แปลง ใช้ได้เฉพาะ "รวมแบบคงนามสกุลเดิม")</label>
+<fieldset id="outputs">
   <legend>เมื่อแปลงเสร็จ ให้ดาวน์โหลดอัตโนมัติ</legend>
   <label><input type="checkbox" id="optZip" checked autocomplete="off"> ไฟล์ที่แปลงแล้วทั้งหมด เป็น zip ไฟล์เดียว</label>
   <label><input type="checkbox" id="optMerge" checked autocomplete="off"> ไฟล์รวม merged.xlsx (ต่อแถวเป็นตารางเดียว)</label>
@@ -50,6 +51,8 @@ const drop=$('drop'),input=$('file'),list=$('list'),bar=$('bar'),msg=$('msg'),ac
 let done=[]; // {name, blob}
 let origs=[]; // original File objects that converted OK
 
+const convertOpts=['optZip','optMerge','optMergeCsv','optEach'];
+$('optConvert').onchange=()=>{const on=$('optConvert').checked;convertOpts.forEach(id=>$(id).disabled=!on);if(!on)$('optOrig').checked=true};
 drop.onclick=()=>input.click();
 input.onchange=()=>handle([...input.files]);
 drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};
@@ -70,10 +73,12 @@ function uniqueName(name){
 async function handle(files){
   reset();
   if(!files.length)return;
+  const doConvert=$('optConvert').checked;
   bar.hidden=false;bar.max=files.length;bar.value=0;
   let n=0;
   for(const f of files){
     const li=document.createElement('li');li.textContent=f.name+' … กำลังแปลง';list.append(li);
+    if(!doConvert){origs.push(f);li.innerHTML='<span class="ok">✓</span> '+f.name+' (ไม่แปลง)';bar.value=++n;continue}
     try{
       const fd=new FormData();fd.append('file',f);
       const r=await fetch('/api/convert',{method:'POST',body:fd});
@@ -87,6 +92,10 @@ async function handle(files){
   }
   input.value='';
   bar.hidden=true;
+  if(!doConvert){
+    if(origs.length>=2)downloadOriginal();else msg.textContent='ต้องมีอย่างน้อย 2 ไฟล์จึงจะรวมได้';
+    return;
+  }
   if(!done.length)return;
   actions.hidden=false;
   msg.innerHTML=`แปลงสำเร็จ ${done.length}/${files.length} ไฟล์`;
