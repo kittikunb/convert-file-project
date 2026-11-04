@@ -16,6 +16,12 @@ app = Flask(__name__)
 MAX_BYTES = 4 * 1024 * 1024  # Vercel serverless request body limit is ~4.5 MB
 
 
+@app.after_request
+def no_store(resp):
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.errorhandler(Exception)
 def on_error(exc):
     return jsonify(error=f"{type(exc).__name__}: {exc}"), 500
@@ -206,26 +212,12 @@ def merge_original_endpoint():
 
 @app.post("/api/merge")
 def merge_endpoint():
-    """Stack all sheets of all uploaded .xlsx files into one table.
-
-    With ?preview=1 returns the first rows as JSON instead of the file.
-    """
+    """Stack all sheets of all uploaded .xlsx files into one table."""
     files = request.files.getlist("files")
     if not files:
         return jsonify(error="No files uploaded"), 400
 
     merged = build_merged(files)
-
-    if request.args.get("preview"):
-        head = merged.head(20)
-        return app.response_class(
-            json.dumps({
-                "total": len(merged),
-                "columns": [str(c) for c in head.columns],
-                "rows": json.loads(head.to_json(orient="values", date_format="iso", date_unit="s")),
-            }),
-            mimetype="application/json",
-        )
 
     if request.args.get("format") == "csv":
         return csv_response(merged)

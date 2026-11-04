@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store">
 <title>File Converter — PDF / XLS → XLSX</title>
 <style>
   body{font-family:system-ui,sans-serif;max-width:760px;margin:48px auto;padding:0 16px;color:#222}
@@ -10,27 +11,19 @@
   #drop.over{background:#eef6ff;border-color:#2b7de9}
   li{margin:8px 0}.err{color:#c00}.ok{color:#080}
   small{color:#666}
-  button{padding:8px 14px;font-size:1rem;cursor:pointer;margin:6px 6px 0 0}
   fieldset{margin:16px 0;border:1px solid #ccc;border-radius:8px}
   label{display:block;margin:4px 0}
   progress{width:100%;margin-top:12px}
-  .scroll{overflow:auto;max-height:340px;margin-top:12px}
-  table{border-collapse:collapse;font-size:.85rem}
-  td,th{border:1px solid #ccc;padding:3px 8px;white-space:nowrap}
-  th{background:#f3f3f3;position:sticky;top:0}
 </style>
 </head>
 <body>
 <h1>File Converter</h1>
 <p>แปลงไฟล์ <b>PDF</b> (ตาราง), <b>XLS</b>, <b>XLSX</b> และ <b>CSV</b> เป็น <b>XLSX</b></p>
 
-<label><input type="checkbox" id="optConvert" checked autocomplete="off"> <b>แปลงเป็น .xlsx</b> (ถ้าไม่ติ๊ก จะไม่แปลง ใช้ได้เฉพาะ "รวมแบบคงนามสกุลเดิม")</label>
+<label><input type="checkbox" id="optConvert" checked autocomplete="off"> <b>แปลงเป็น .xlsx</b> <small>(ไม่ติ๊ก = ไม่แปลง แต่ยังรวมไฟล์ให้ ต้องเป็นไฟล์ชนิดเดียวกัน)</small></label>
 <fieldset id="outputs">
-  <legend>เมื่อแปลงเสร็จ ให้ดาวน์โหลดอัตโนมัติ</legend>
+  <legend>ดาวน์โหลดอัตโนมัติ (ไฟล์รวม merged จะดาวน์โหลดให้เสมอ เมื่อมี 2 ไฟล์ขึ้นไป)</legend>
   <label><input type="checkbox" id="optZip" checked autocomplete="off"> ไฟล์ที่แปลงแล้วทั้งหมด เป็น zip ไฟล์เดียว</label>
-  <label><input type="checkbox" id="optMerge" checked autocomplete="off"> ไฟล์รวม merged.xlsx (ต่อแถวเป็นตารางเดียว)</label>
-  <label><input type="checkbox" id="optMergeCsv" autocomplete="off"> ไฟล์รวม merged.csv (ต่อแถวเป็นตารางเดียว, ภาษาไทยเปิดใน Excel ได้)</label>
-  <label><input type="checkbox" id="optOrig" autocomplete="off"> ไฟล์รวมคงนามสกุลเดิม — เฉพาะไฟล์ชนิดเดียวกัน (csv→csv, xlsx→xlsx, pdf→pdf รวมเป็นเล่มเดียว, xls→xlsx)</label>
   <label><input type="checkbox" id="optEach" autocomplete="off"> ไฟล์แยกทีละไฟล์ (ดาวน์โหลดหลายครั้ง)</label>
 </fieldset>
 
@@ -39,27 +32,23 @@
 <progress id="bar" value="0" max="1" hidden></progress>
 <ul id="list"></ul>
 
-<div id="actions" hidden>
-  <button id="btnPreview">ดูตัวอย่างข้อมูลรวม</button>
-</div>
 <p id="msg"></p>
-<div id="preview" class="scroll" hidden></div>
 
 <script>
 const $=id=>document.getElementById(id);
-const drop=$('drop'),input=$('file'),list=$('list'),bar=$('bar'),msg=$('msg'),actions=$('actions'),preview=$('preview');
+const drop=$('drop'),input=$('file'),list=$('list'),bar=$('bar'),msg=$('msg');
 let done=[]; // {name, blob}
 let origs=[]; // original File objects that converted OK
 
-const convertOpts=['optZip','optMerge','optMergeCsv','optEach'];
-$('optConvert').onchange=()=>{const on=$('optConvert').checked;convertOpts.forEach(id=>$(id).disabled=!on);if(!on)$('optOrig').checked=true};
+const convertOpts=['optZip','optEach'];
+$('optConvert').onchange=()=>{const on=$('optConvert').checked;convertOpts.forEach(id=>$(id).disabled=!on);};
 drop.onclick=()=>input.click();
 input.onchange=()=>handle([...input.files]);
 drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};
 drop.ondragleave=()=>drop.classList.remove('over');
 drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');handle([...e.dataTransfer.files])};
 
-function reset(){list.innerHTML='';done=[];origs=[];actions.hidden=true;msg.textContent='';preview.hidden=true;preview.innerHTML='';bar.hidden=true}
+function reset(){list.innerHTML='';done=[];origs=[];msg.textContent='';bar.hidden=true}
 
 function save(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),10000)}
 async function errText(r){let m=r.statusText;try{m=(await r.json()).error||m}catch{}return m}
@@ -97,15 +86,11 @@ async function handle(files){
     return;
   }
   if(!done.length)return;
-  actions.hidden=false;
   msg.innerHTML=`แปลงสำเร็จ ${done.length}/${files.length} ไฟล์`;
   if($('optZip').checked)downloadZip();
-  if($('optMerge').checked&&done.length>=2)setTimeout(()=>downloadMerged('xlsx'),600);
-  if($('optMergeCsv').checked&&done.length>=2)setTimeout(()=>downloadMerged('csv'),1200);
-  if($('optOrig').checked&&origs.length>=2)setTimeout(downloadOriginal,1800);
+  if(done.length>=2)setTimeout(downloadMerged,600);
 }
 
-$('btnPreview').onclick=showPreview;
 
 async function downloadZip(){
   const entries=await Promise.all(done.map(async d=>({name:d.name,data:new Uint8Array(await d.blob.arrayBuffer())})));
@@ -114,20 +99,19 @@ async function downloadZip(){
 
 function mergeForm(){const fd=new FormData();done.forEach(d=>fd.append('files',d.blob,d.name));return fd}
 
-async function downloadMerged(fmt='xlsx'){
-  if(done.length<2){msg.textContent='ต้องมีอย่างน้อย 2 ไฟล์จึงจะรวมได้';return}
+async function downloadMerged(){
   msg.textContent='กำลังรวมไฟล์…';
   try{
-    const r=await fetch('/api/merge?format='+fmt,{method:'POST',body:mergeForm()});
+    const r=await fetch('/api/merge',{method:'POST',body:mergeForm()});
     if(!r.ok)throw new Error(r.status===413?'ไฟล์รวมใหญ่เกิน 4 MB':await errText(r));
-    save(await r.blob(),'merged.'+fmt);
-    msg.innerHTML='<span class="ok">✓</span> รวม '+done.length+' ไฟล์แล้ว';
+    save(await r.blob(),'merged.xlsx');
+    msg.innerHTML='<span class="ok">✓</span> รวม '+done.length+' ไฟล์เป็น merged.xlsx แล้ว';
   }catch(e){msg.innerHTML='<span class="err">✗ รวมไฟล์ไม่สำเร็จ:</span> '+e.message}
 }
 
 async function downloadOriginal(){
   const kinds=[...new Set(origs.map(f=>f.name.split('.').pop().toLowerCase()))];
-  if(kinds.length>1){msg.innerHTML='<span class="err">✗ รวมแบบคงนามสกุลเดิมไม่ได้:</span> ต้องเป็นไฟล์ชนิดเดียวกัน (พบ '+kinds.map(k=>'.'+k).join(', ')+')';return}
+  if(kinds.length>1){msg.innerHTML='<span class="err">✗ รวมโดยไม่แปลงไม่ได้:</span> ต้องเป็นไฟล์ชนิดเดียวกัน (พบ '+kinds.map(k=>'.'+k).join(', ')+') — ติ๊ก "แปลงเป็น .xlsx" เพื่อรวมไฟล์ต่างชนิดกัน';return}
   msg.textContent='กำลังรวมไฟล์ต้นฉบับ…';
   try{
     const fd=new FormData();origs.forEach(f=>fd.append('files',f,f.name));
@@ -135,23 +119,8 @@ async function downloadOriginal(){
     if(!r.ok)throw new Error(r.status===413?'ไฟล์ต้นฉบับรวมกันใหญ่เกิน 4 MB':await errText(r));
     const ext=kinds[0]==='xls'?'xlsx':kinds[0];
     save(await r.blob(),'merged.'+ext);
-    msg.innerHTML='<span class="ok">✓</span> รวมไฟล์ต้นฉบับ '+origs.length+' ไฟล์เป็น merged.'+ext;
-  }catch(e){msg.innerHTML='<span class="err">✗ รวมไฟล์ต้นฉบับไม่สำเร็จ:</span> '+e.message}
-}
-
-async function showPreview(){
-  if(done.length<1)return;
-  msg.textContent='กำลังโหลดตัวอย่าง…';
-  try{
-    const r=await fetch('/api/merge?preview=1',{method:'POST',body:mergeForm()});
-    if(!r.ok)throw new Error(r.status===413?'ไฟล์รวมใหญ่เกิน 4 MB':await errText(r));
-    const j=await r.json();
-    const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-    preview.innerHTML=`<table><thead><tr>${j.columns.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>`+
-      j.rows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')+'</tbody></table>';
-    preview.hidden=false;
-    msg.textContent=`ตัวอย่าง ${j.rows.length} แถวแรก จากทั้งหมด ${j.total} แถว`;
-  }catch(e){msg.innerHTML='<span class="err">✗</span> '+e.message}
+    msg.innerHTML='<span class="ok">✓</span> รวม '+origs.length+' ไฟล์เป็น merged.'+ext+' แล้ว';
+  }catch(e){msg.innerHTML='<span class="err">✗ รวมไฟล์ไม่สำเร็จ:</span> '+e.message}
 }
 
 // minimal ZIP writer (store, no compression — .xlsx is already compressed)
