@@ -132,6 +132,18 @@ def merge_endpoint():
             mimetype="application/json",
         )
 
+    if request.args.get("format") == "csv":
+        if "file_date" in merged.columns:
+            merged["file_date"] = merged["file_date"].dt.strftime("%Y-%m-%d")
+        # utf-8-sig so Excel opens Thai text correctly
+        data = merged.to_csv(index=False).encode("utf-8-sig")
+        return send_file(
+            io.BytesIO(data),
+            as_attachment=True,
+            download_name="merged.csv",
+            mimetype="text/csv",
+        )
+
     out = io.BytesIO()
     merged.to_excel(out, index=False, sheet_name="Merged")
     out.seek(0)

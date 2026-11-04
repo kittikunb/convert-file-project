@@ -28,6 +28,7 @@
   <legend>เมื่อแปลงเสร็จ ให้ดาวน์โหลดอัตโนมัติ</legend>
   <label><input type="checkbox" id="optZip" checked autocomplete="off"> ไฟล์ที่แปลงแล้วทั้งหมด เป็น zip ไฟล์เดียว</label>
   <label><input type="checkbox" id="optMerge" checked autocomplete="off"> ไฟล์รวม merged.xlsx (ต่อแถวเป็นตารางเดียว)</label>
+  <label><input type="checkbox" id="optMergeCsv" autocomplete="off"> ไฟล์รวม merged.csv (ต่อแถวเป็นตารางเดียว, ภาษาไทยเปิดใน Excel ได้)</label>
   <label><input type="checkbox" id="optEach" autocomplete="off"> ไฟล์แยกทีละไฟล์ (ดาวน์โหลดหลายครั้ง)</label>
 </fieldset>
 
@@ -88,7 +89,8 @@ async function handle(files){
   actions.hidden=false;
   msg.innerHTML=`แปลงสำเร็จ ${done.length}/${files.length} ไฟล์`;
   if($('optZip').checked)downloadZip();
-  if($('optMerge').checked&&done.length>=2)setTimeout(downloadMerged,600);
+  if($('optMerge').checked&&done.length>=2)setTimeout(()=>downloadMerged('xlsx'),600);
+  if($('optMergeCsv').checked&&done.length>=2)setTimeout(()=>downloadMerged('csv'),1200);
 }
 
 $('btnPreview').onclick=showPreview;
@@ -100,13 +102,13 @@ async function downloadZip(){
 
 function mergeForm(){const fd=new FormData();done.forEach(d=>fd.append('files',d.blob,d.name));return fd}
 
-async function downloadMerged(){
+async function downloadMerged(fmt='xlsx'){
   if(done.length<2){msg.textContent='ต้องมีอย่างน้อย 2 ไฟล์จึงจะรวมได้';return}
   msg.textContent='กำลังรวมไฟล์…';
   try{
-    const r=await fetch('/api/merge',{method:'POST',body:mergeForm()});
+    const r=await fetch('/api/merge?format='+fmt,{method:'POST',body:mergeForm()});
     if(!r.ok)throw new Error(r.status===413?'ไฟล์รวมใหญ่เกิน 4 MB':await errText(r));
-    save(await r.blob(),'merged.xlsx');
+    save(await r.blob(),'merged.'+fmt);
     msg.innerHTML='<span class="ok">✓</span> รวม '+done.length+' ไฟล์แล้ว';
   }catch(e){msg.innerHTML='<span class="err">✗ รวมไฟล์ไม่สำเร็จ:</span> '+e.message}
 }
